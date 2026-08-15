@@ -1,10 +1,3 @@
-# เครดิต
-# By.ivzex
-# By.patxez
-# DEV.manpop79
-# DEV.Fugus1234
-# ฝากติดตามRoblox พวกผมด้วยนะค้าบ
-# นำไปขายต่อได้ ให้เครดิตพวกผมด้วยนะค้าบ❤️
 import os
 import asyncio
 import json
@@ -299,8 +292,16 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
         unique_roles = list({role.id: role for role in roles_to_add}.values())
         await member.edit(roles=unique_roles, nick=nickname[:32])
         return rank_val if not is_dev else 999, member.display_name, display_rank_name
-    except (discord.HTTPException, ValueError, TypeError) as error:
-        print(f"Update Error: {error}")
+    except discord.HTTPException as error:
+        if error.code == 50013:
+            print(f"Update Error [403 Forbidden]: บอทไม่มีสิทธิ์จัดการโรล/ชื่อเล่น (Missing Permissions) หรือ Role ของบอทอยู่ต่ำกว่า Role ที่พยายามใส่ | รายละเอียด: {error}")
+        elif error.code == 10007:
+            print(f"Update Error [404 Unknown Member]: ไม่พบสมาชิกในเซิร์ฟเวอร์ (Discord ID: {discord_id}) อาจจะยังไม่ได้เข้าเซิร์ฟเวอร์หรือออกไปแล้ว")
+        else:
+            print(f"Update Error [Discord HTTPException {error.code}]: {error}")
+        return None, None, None
+    except Exception as error:
+        print(f"Update Error [General]: {error}")
         return None, None, None
 
 
@@ -405,7 +406,7 @@ class VerifyView(discord.ui.View):
     async def start_v(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = get_user(interaction.user.id)
         if user and user["verified"]:
-            embed = discord.Embed(title="❗พบข้อมูล Roblox Account อยู่แล้ว❗", color=0x3498DB)
+            embed = discord.Embed(title="#พบข้อมูล Roblox Account อยู่แล้ว", color=0x3498DB)
             embed.add_field(
                 name="ข้อมูลปัจจุบัน:",
                 value=(
@@ -717,6 +718,4 @@ if __name__ == "__main__":
 # หมายเหตุ: บรรทัดคอมเมนต์ด้านล่างนี้ใช้เพื่อย้ำรูปแบบคำสั่งภาษาไทยเท่านั้น
 # /ยืนยันตัวตน ยังคงเป็นคำสั่งตั้งค่าข้อความปุ่มยืนยันตัวตน
 # /ล้างข้อมูล และ /ล้างข้อมูลทั้งหมด ยังคงล้างเฉพาะข้อมูลในตาราง users
-
-# ขอบคุณที่ซื้อนะค้าบ❤️❤️
 
