@@ -20,6 +20,7 @@ DB_PATH = os.getenv("DB_PATH", "database.db")
 SETTINGS_PATH = os.getenv("SETTINGS_PATH", "settings.json")
 
 DEFAULT_SETTINGS = {
+    "discord_guild_id": None,
     "roblox_group_id": 226834839,
     "roblox_group_url": "https://www.roblox.com/groups/226834839",
     "roblox_map_url": "https://www.roblox.com/th/games/78189317414125/By",
@@ -230,11 +231,16 @@ def get_prefix_for_rank(rank_val, rank_name, settings):
 
 async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=None):
     settings = load_settings()
-    guild = bot.get_guild(int(guild_id)) if guild_id else None
+    
+    # ลำดับการเลือก Guild: 1. จาก Webhook -> 2. จาก Settings -> 3. เซิร์ฟเวอร์แรกที่บอทอยู่
+    target_guild_id = guild_id or settings.get("discord_guild_id")
+    guild = bot.get_guild(int(target_guild_id)) if target_guild_id else None
+    
     if guild is None and bot.guilds:
         guild = bot.guilds[0]
+        
     if guild is None:
-        return None, None, None
+        return None, None, None, "ไม่พบเซิร์ฟเวอร์ Discord ของบอท (กรุณาตั้งค่า Discord Guild ID)"
 
     try:
         member = await guild.fetch_member(int(discord_id))
@@ -251,7 +257,6 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
         }
         role_ids_to_manage.discard(None)
 
-        # เก็บโรลอื่นของสมาชิกไว้ ไม่ลบทิ้งทั้งหมดเหมือนโค้ดเดิม
         roles_to_add = [
             role for role in member.roles
             if role != guild.default_role and role.id not in role_ids_to_manage
@@ -288,21 +293,22 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
             nickname = f"Guest | {roblox_username}"
             display_rank_name = "Guest"
 
-        # กันโรลซ้ำจากกรณีตั้งค่าบทบาทเดียวกันหลายช่อง
         unique_roles = list({role.id: role for role in roles_to_add}.values())
         await member.edit(roles=unique_roles, nick=nickname[:32])
-        return rank_val if not is_dev else 999, member.display_name, display_rank_name
+        return rank_val if not is_dev else 999, member.display_name, display_rank_name, None
     except discord.HTTPException as error:
         if error.code == 50013:
-            print(f"Update Error [403 Forbidden]: บอทไม่มีสิทธิ์จัดการโรล/ชื่อเล่น (Missing Permissions) หรือ Role ของบอทอยู่ต่ำกว่า Role ที่พยายามใส่ | รายละเอียด: {error}")
+            msg = "บอทไม่มีสิทธิ์จัดการโรล/ชื่อ (Missing Permissions) หรือ Role บอทอยู่ต่ำกว่า Role ที่ใส่"
         elif error.code == 10007:
-            print(f"Update Error [404 Unknown Member]: ไม่พบสมาชิกในเซิร์ฟเวอร์ (Discord ID: {discord_id}) อาจจะยังไม่ได้เข้าเซิร์ฟเวอร์หรือออกไปแล้ว")
+            msg = "ไม่พบคุณใน Discord Server นี้ (อาจยังไม่ได้เข้าเซิร์ฟเวอร์)"
         else:
-            print(f"Update Error [Discord HTTPException {error.code}]: {error}")
-        return None, None, None
+            msg = f"Discord Error {error.code}"
+        print(f"Update Error [{error.code}]: {error}")
+        return None, None, None, msg
     except Exception as error:
-        print(f"Update Error [General]: {error}")
-        return None, None, None
+        msg = f"Error: {str(error)}"
+        print(f"Update Error: {error}")
+        return None, None, None, msg
 
 
 # =========================
@@ -423,6 +429,11 @@ class VerifyView(discord.ui.View):
 
 
 class CustomizeAllModal(discord.ui.Modal, title="ปรับแต่งระบบทั้งหมด"):
+    discord_guild_id = discord.ui.TextInput(
+        label="Discord Server ID (Guild ID)",
+        required=False,
+        placeholder="ใส่ ID เซิร์ฟเวอร์ Discord เพื่อป้องกันปัญหา 404",
+    )
     group_id = discord.ui.TextInput(
         label="Roblox Group ID",
         required=False,
@@ -454,6 +465,11 @@ class CustomizeAllModal(discord.ui.Modal, title="ปรับแต่งระ�
     async def on_submit(self, interaction: discord.Interaction):
         settings = load_settings()
         
+        # อัพเดท Discord Guild ID
+        if self.discord_guild_id.value.strip():
+            guild_id = parse_id(self.discord_guild_id.value.strip())
+            if guild_id: settings["discord_guild_id"] = guild_id
+            
         # อัพเดท Group ID
         if self.group_id.value.strip():
             gid = parse_id(self.group_id.value.strip())
@@ -604,7 +620,8 @@ async def show_settings(interaction: discord.Interaction):
     settings = load_settings()
     role_ids = settings.get("role_ids", {})
     embed = discord.Embed(title="การตั้งค่าระบบปัจจุบัน", color=0x3498DB)
-    embed.add_field(name="Group ID", value=str(settings.get("roblox_group_id")), inline=False)
+    embed.add_field(name="Discord Server ID", value=str(settings.get("discord_guild_id") or "ยังไม่ได้ตั้งค่า (ใช้เซิร์ฟเวอร์แรก)"), inline=False)
+    embed.add_field(name="Roblox Group ID", value=str(settings.get("roblox_group_id")), inline=False)
     embed.add_field(name="Verified Role ID", value=str(settings.get("verified_role_id")), inline=False)
     embed.add_field(
         name="Role IDs",
@@ -671,7 +688,7 @@ async def verify_endpoint(request: Request):
             ),
         }
 
-    rank, display_name, rank_name = await update_member_status(
+    rank, display_name, rank_name, err_msg = await update_member_status(
         row["discord_id"], roblox_id, roblox_username, guild_id
     )
     if rank is not None:
@@ -693,7 +710,7 @@ async def verify_endpoint(request: Request):
             "current_rank": rank_name,
         }
 
-    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศหรือไม่พบเซิร์ฟเวอร์ Discord"}
+    return {"ok": False, "message": err_msg or "บอทไม่มีสิทธิ์เปลี่ยนยศหรือไม่พบเซิร์ฟเวอร์ Discord"}
 
 
 if __name__ == "__main__":
