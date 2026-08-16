@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     "roblox_map_url": "https://www.roblox.com/th/games/78189317414125/By",
     "verified_role_id": 1479443343367995579,
     "developer_role_id": 1479469155399766129,
+    "verified_emoji": "✅",  # เพิ่มอีโมจิเริ่มต้นใน Settings
     "role_ids": {
         "or": 1479699133001629797,
         "of_low": 1479699314078122094,
@@ -54,8 +55,17 @@ DEFAULT_SETTINGS = {
 }
 
 DEVELOPER_IDS = [5711452462]
-VERIFIED_EMOJI = "✅"
 
+def get_safe_emoji(emoji_str):
+    """ฟังก์ชันแปลงอีโมจิให้รองรับทั้ง Emoji ธรรมดา และ Custom Emoji โดยไม่เกิด Error"""
+    if not emoji_str:
+        return "✅"
+    if isinstance(emoji_str, str) and emoji_str.startswith("<") and emoji_str.endswith(">"):
+        try:
+            return discord.PartialEmoji.from_str(emoji_str)
+        except Exception:
+            return "✅"
+    return emoji_str
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
@@ -79,7 +89,6 @@ def init_db():
             """
         )
 
-
 def get_guild_settings(guild_id):
     if not guild_id:
         return json.loads(json.dumps(DEFAULT_SETTINGS))
@@ -102,7 +111,6 @@ def get_guild_settings(guild_id):
             print(f"Error parsing settings for guild {guild_id}: {e}")
     return settings
 
-
 def save_guild_settings(guild_id, settings):
     if not guild_id:
         return
@@ -116,19 +124,16 @@ def save_guild_settings(guild_id, settings):
             (str(guild_id), json.dumps(settings, ensure_ascii=False))
         )
 
-
 def parse_id(value):
     if value is None:
         return None
     match = re.search(r"\d+", str(value))
     return int(match.group()) if match else None
 
-
 def get_user(discord_id):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         return conn.execute("SELECT * FROM users WHERE discord_id = ?", (str(discord_id),)).fetchone()
-
 
 def update_pending(discord_id, username):
     with sqlite3.connect(DB_PATH) as conn:
@@ -142,7 +147,6 @@ def update_pending(discord_id, username):
             """,
             (str(discord_id), str(username).strip().lower()),
         )
-
 
 # =========================
 # BOT SETUP
@@ -160,9 +164,7 @@ class MyBot(commands.Bot):
         await self.tree.sync()
         print(f"Dev System Multi-Guild v7 slash commands synced for {self.user}")
 
-
 bot = MyBot()
-
 
 def get_roblox_id_by_name(username):
     try:
@@ -179,7 +181,6 @@ def get_roblox_id_by_name(username):
         print(f"Error fetching Roblox ID: {error}")
     return None
 
-
 def check_group_membership(roblox_id, group_id):
     try:
         response = requests.get(
@@ -193,7 +194,6 @@ def check_group_membership(roblox_id, group_id):
     except (requests.RequestException, ValueError, KeyError, TypeError) as error:
         print(f"Error checking group membership: {error}")
     return False, 0, None
-
 
 def get_prefix_for_rank(rank_val, rank_name, settings):
     prefixes = settings.get("rank_prefixes", {})
@@ -221,7 +221,6 @@ def get_prefix_for_rank(rank_val, rank_name, settings):
         16: "OF-7, PMG", 17: "OF-8, MG", 18: "OF-9, GEN",
     }
     return fallback.get(numeric_rank, "")
-
 
 async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=None):
     guild = bot.get_guild(int(guild_id)) if guild_id else None
@@ -297,7 +296,6 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
         print(f"Update Error: {error}")
         return None, None, None, msg
 
-
 # =========================
 # UI COMPONENTS
 # =========================
@@ -353,7 +351,6 @@ class VerifyModal(discord.ui.Modal, title="ยืนยันตัวตน Rob
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
 class ReVerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -378,7 +375,11 @@ class ReVerifyView(discord.ui.View):
             await interaction.edit_original_response(content=f"❌ เกิดข้อผิดพลาด: {err_msg}")
             return
 
-        embed = discord.Embed(title=f"{VERIFIED_EMOJI} อัพเดทยศสำเร็จ", color=0x00FF00)
+        settings = get_guild_settings(guild_id)
+        v_emoji = settings.get("verified_emoji", "✅")
+        safe_v_emoji = get_safe_emoji(v_emoji)
+        
+        embed = discord.Embed(title=f"{safe_v_emoji} อัพเดทยศสำเร็จ", color=0x00FF00)
         embed.description = (
             "ข้อมูลของคุณเป็นปัจจุบันแล้ว\n\n"
             f"**Roblox:** {user['roblox_username']}\n**ยศปัจจุบัน:** {rank_name}"
@@ -389,10 +390,14 @@ class ReVerifyView(discord.ui.View):
     async def change_acc(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(VerifyModal())
 
-
 class VerifyView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, emoji_str="✅"):
         super().__init__(timeout=None)
+        # ปรับแต่งอีโมจิของปุ่มตามค่าที่รับมา
+        try:
+            self.start_v_btn.emoji = get_safe_emoji(emoji_str)
+        except Exception:
+            pass
 
     @discord.ui.button(
         label="ยืนยันตัวตน",
@@ -400,16 +405,20 @@ class VerifyView(discord.ui.View):
         emoji="✅",
         custom_id="persistent_verify",
     )
-    async def start_v(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def start_v_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = get_user(interaction.user.id)
         if user and user["verified"]:
+            settings = get_guild_settings(interaction.guild_id)
+            v_emoji = settings.get("verified_emoji", "✅")
+            safe_v_emoji = get_safe_emoji(v_emoji)
+            
             embed = discord.Embed(title="#พบข้อมูล Roblox Account อยู่แล้ว", color=0x3498DB)
             embed.add_field(
                 name="ข้อมูลปัจจุบัน:",
                 value=(
                     f"**Roblox:** {user['roblox_username']}\n"
                     f"**Roblox ID:** {user['roblox_id']}\n"
-                    f"**สถานะ:** ยืนยันแล้ว {VERIFIED_EMOJI}"
+                    f"**สถานะ:** ยืนยันแล้ว {safe_v_emoji}"
                 ),
                 inline=False,
             )
@@ -417,7 +426,6 @@ class VerifyView(discord.ui.View):
             await interaction.response.send_message(embed=embed, view=ReVerifyView(), ephemeral=True)
         else:
             await interaction.response.send_modal(VerifyModal())
-
 
 class CustomizeAllModal(discord.ui.Modal, title="ปรับแต่งระบบทั้งหมด"):
     group_id = discord.ui.TextInput(
@@ -495,21 +503,41 @@ class CustomizeAllModal(discord.ui.Modal, title="ปรับแต่งระ�
             ephemeral=True,
         )
 
-
 # =========================
 # SLASH COMMANDS
 # =========================
 @bot.tree.command(name="ยืนยันตัวตน", description="ตั้งค่าระบบยืนยันตัวตน (Administrator Only)")
 @app_commands.default_permissions(administrator=True)
 async def setup_verify(interaction: discord.Interaction):
+    settings = get_guild_settings(interaction.guild_id)
+    v_emoji = settings.get("verified_emoji", "✅")
+    
     embed = discord.Embed(
         title="ระบบยืนยันตัวตนทหารไทย",
         description="กรุณากดปุ่มด้านล่างเพื่อเริ่มการยืนยันตัวตนกับ Roblox",
         color=0x2B2D31,
     )
-    await interaction.channel.send(embed=embed, view=VerifyView())
+    await interaction.channel.send(embed=embed, view=VerifyView(v_emoji))
     await interaction.response.send_message("✅ ตั้งค่าระบบยืนยันตัวตนเรียบร้อยแล้ว", ephemeral=True)
 
+@bot.tree.command(name="ตั้งค่าอีโมจิ", description="เปลี่ยนอีโมจิกดยืนยันตัวตนของเซิร์ฟเวอร์นี้ (Administrator Only)")
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(อีโมจิ="ใส่อีโมจิธรรมดา หรือ Custom Emoji เช่น <:name:ID>")
+async def set_emoji(interaction: discord.Interaction, อีโมจิ: str):
+    if not interaction.guild_id:
+        await interaction.response.send_message("❌ คำสั่งนี้ต้องใช้ภายใน Server เท่านั้น", ephemeral=True)
+        return
+
+    settings = get_guild_settings(interaction.guild_id)
+    settings["verified_emoji"] = อีโมจิ.strip()
+    save_guild_settings(interaction.guild_id, settings)
+
+    safe_e = get_safe_emoji(settings["verified_emoji"])
+    await interaction.response.send_message(
+        f"✅ ตั้งค่าอีโมจิยืนยันตัวตนเป็น {safe_e} เรียบร้อยแล้ว!\n"
+        "*(พิมพ์ `/ยืนยันตัวตน` อีกครั้งเพื่อส่งปุ่มกดด้วยอีโมจิใหม่)*",
+        ephemeral=True,
+    )
 
 async def clear_verification_data(interaction: discord.Interaction):
     with sqlite3.connect(DB_PATH) as conn:
@@ -519,18 +547,15 @@ async def clear_verification_data(interaction: discord.Interaction):
         ephemeral=True,
     )
 
-
 @bot.tree.command(name="ล้างข้อมูล", description="ลบข้อมูลการยืนยันตัวตนทุกคน")
 @app_commands.default_permissions(administrator=True)
 async def reset_db_short(interaction: discord.Interaction):
     await clear_verification_data(interaction)
 
-
 @bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="ลบข้อมูลการยืนยันตัวตนทุกคน (คำสั่งเดิม)")
 @app_commands.default_permissions(administrator=True)
 async def reset_db_legacy(interaction: discord.Interaction):
     await clear_verification_data(interaction)
-
 
 @bot.tree.command(name="ใส่โรล", description="ตั้งค่า Role ให้กับประเภทที่เลือกของเซิร์ฟเวอร์นี้")
 @app_commands.default_permissions(administrator=True)
@@ -565,7 +590,6 @@ async def set_role(interaction: discord.Interaction, ประเภท: app_com
         ephemeral=True,
     )
 
-
 @bot.tree.command(name="ใส่คำนำหน้า", description="เพิ่มหรือแก้คำนำหน้าตามชื่อยศ Roblox ของเซิร์ฟเวอร์นี้")
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(
@@ -591,12 +615,10 @@ async def set_prefix(interaction: discord.Interaction, ยศ: str, คำนำ
         ephemeral=True,
     )
 
-
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="เปิดหน้าต่างปรับแต่งระบบกลุ่ม โรล และคำนำหน้าของเซิร์ฟเวอร์นี้")
 @app_commands.default_permissions(administrator=True)
 async def customize_all(interaction: discord.Interaction):
     await interaction.response.send_modal(CustomizeAllModal())
-
 
 @bot.tree.command(name="ดูการตั้งค่า", description="ดูการตั้งค่าระบบปัจจุบันของเซิร์ฟเวอร์นี้")
 @app_commands.default_permissions(administrator=True)
@@ -607,9 +629,12 @@ async def show_settings(interaction: discord.Interaction):
 
     settings = get_guild_settings(interaction.guild_id)
     role_ids = settings.get("role_ids", {})
+    v_emoji = settings.get("verified_emoji", "✅")
+    
     embed = discord.Embed(title="การตั้งค่าระบบปัจจุบัน (Server นี้)", color=0x3498DB)
     embed.add_field(name="Roblox Group ID", value=str(settings.get("roblox_group_id")), inline=False)
     embed.add_field(name="Verified Role ID", value=str(settings.get("verified_role_id")), inline=False)
+    embed.add_field(name="อีโมจิยืนยันตัวตน", value=str(v_emoji), inline=False)
     embed.add_field(
         name="Role IDs",
         value=(
@@ -630,7 +655,6 @@ async def show_settings(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
 # =========================
 # FASTAPI WEBHOOK
 # =========================
@@ -641,16 +665,14 @@ async def lifespan(app: FastAPI):
     yield
     await bot.close()
 
-
 app = FastAPI(lifespan=lifespan)
-
 
 @app.post("/verify")
 async def verify_endpoint(request: Request):
     data = await request.json()
     roblox_id = data.get("robloxId")
     roblox_username = str(data.get("robloxUsername", "")).strip()
-    guild_id = data.get("guildId") # ส่ง guildId มาจาก Roblox ได้ (ถ้ามี)
+    guild_id = data.get("guildId")
     search_name = roblox_username.lower()
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -691,7 +713,6 @@ async def verify_endpoint(request: Request):
         }
 
     return {"ok": False, "message": err_msg or "บอทไม่มีสิทธิ์เปลี่ยนยศหรือไม่พบเซิร์ฟเวอร์ Discord"}
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
